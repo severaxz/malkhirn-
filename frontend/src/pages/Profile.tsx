@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from 'react'
+import { createPortal } from 'react-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useNavigate } from 'react-router-dom'
 import { useTonConnectUI, useTonWallet } from '@tonconnect/ui-react'
@@ -179,7 +180,7 @@ export default function Profile() {
       </div>
 
       <AnimatePresence>
-        {depositOpen && (
+        {depositOpen && createPortal(
           <>
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-black/60 z-40" onClick={() => setDepositOpen(false)} />
             <motion.div
@@ -279,7 +280,7 @@ export default function Profile() {
                 </>
               )}
             </motion.div>
-          </>
+          </>, document.body
         )}
       </AnimatePresence>
     </div>
