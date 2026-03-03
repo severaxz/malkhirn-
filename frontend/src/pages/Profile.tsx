@@ -26,6 +26,10 @@ export default function Profile() {
   const [tonConnectUI] = useTonConnectUI()
   const wallet = useTonWallet()
   const navigate = useNavigate()
+
+  // Адрес кошелька: либо из активной сессии TonConnect, либо из бэкенда (если сессия устарела)
+  const walletAddress = wallet?.account.address ?? user?.ton_wallet_address ?? null
+  const isConnected = !!walletAddress
   const tgUser = tg?.initDataUnsafe?.user
 
   const loadData = useCallback(async () => {
@@ -133,15 +137,15 @@ export default function Profile() {
             <div className="flex-1">
               <p className="text-sm font-semibold text-white">TON Кошелёк</p>
               <p className="text-xs text-ink-3 font-mono">
-                {wallet ? wallet.account.address.slice(0, 8) + '...' + wallet.account.address.slice(-6) : 'Не подключён'}
+                {walletAddress ? walletAddress.slice(0, 8) + '...' + walletAddress.slice(-6) : 'Не подключён'}
               </p>
             </div>
-            <div className={`flex items-center gap-1.5 ${wallet ? 'text-yes' : 'text-ink-4'}`}>
-              <div className={`w-2 h-2 rounded-full ${wallet ? 'bg-yes' : 'bg-ink-4'}`} />
-              <span className="text-xs font-semibold">{wallet ? 'Активен' : 'Откл.'}</span>
+            <div className={`flex items-center gap-1.5 ${isConnected ? 'text-yes' : 'text-ink-4'}`}>
+              <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-yes' : 'bg-ink-4'}`} />
+              <span className="text-xs font-semibold">{isConnected ? 'Активен' : 'Откл.'}</span>
             </div>
           </div>
-          {!wallet && (
+          {!isConnected && (
             <p className="text-xs text-ink-3 leading-relaxed">Подключи TON-кошелёк через кнопку «Пополнить» для внесения средств.</p>
           )}
         </motion.div>
@@ -179,8 +183,9 @@ export default function Profile() {
         </motion.div>
       </div>
 
-      <AnimatePresence>
-        {depositOpen && createPortal(
+      {createPortal(
+        <AnimatePresence>
+          {depositOpen && (
           <>
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-black/60 z-40" onClick={() => setDepositOpen(false)} />
             <motion.div
@@ -202,7 +207,7 @@ export default function Profile() {
                   <h2 className="text-lg font-bold text-white mb-1">Пополнить через TON</h2>
                   <p className="text-sm text-ink-3 mb-4">Отправь TON — баланс зачислится автоматически за ~30 сек</p>
 
-                  {!wallet ? (
+                  {!isConnected ? (
                     <div className="mb-4">
                       <p className="text-xs text-ink-3 mb-2">Подключи кошелёк чтобы продолжить:</p>
                       <button
@@ -219,7 +224,7 @@ export default function Profile() {
                         <TonIcon />
                         <div className="flex-1 min-w-0">
                           <p className="text-xs text-ink-3">Кошелёк подключён</p>
-                          <p className="text-sm font-mono text-white truncate">{wallet.account.address.slice(0, 10)}...{wallet.account.address.slice(-8)}</p>
+                          <p className="text-sm font-mono text-white truncate">{walletAddress!.slice(0, 10)}...{walletAddress!.slice(-8)}</p>
                         </div>
                         <div className="w-2 h-2 rounded-full bg-yes flex-shrink-0" />
                       </div>
@@ -280,9 +285,11 @@ export default function Profile() {
                 </>
               )}
             </motion.div>
-          </>, document.body
-        )}
-      </AnimatePresence>
+          </>
+          )}
+        </AnimatePresence>,
+        document.body
+      )}
     </div>
   )
 }
