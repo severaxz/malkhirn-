@@ -185,7 +185,7 @@ export default function Profile() {
             <motion.div
               initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
               transition={{ type: 'spring', damping: 28, stiffness: 300 }}
-              className="fixed bottom-0 left-0 right-0 z-50 bg-surface border-t border-border rounded-t-3xl px-4 pt-4 pb-8"
+              className="fixed bottom-0 left-0 right-0 z-50 bg-surface border-t border-border rounded-t-3xl px-4 pt-4 max-h-[90vh] overflow-y-auto" style={{ paddingBottom: 'max(40px, env(safe-area-inset-bottom, 40px))' }}
             >
               <div className="w-10 h-1 bg-border rounded-full mx-auto mb-5" />
 
