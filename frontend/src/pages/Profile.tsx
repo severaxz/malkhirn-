@@ -5,7 +5,7 @@ import { useNavigate } from 'react-router-dom'
 import { useTonConnectUI, useTonWallet } from '@tonconnect/ui-react'
 import {
   fetchMe, fetchPortfolio, fetchPaymentInfo,
-  saveWalletAddress, fetchDeposits,
+  saveWalletAddress, fetchDeposits, requestWithdrawal,
   User, Position, PaymentInfo, TonDeposit,
 } from '../lib/api'
 import { tg, hapticNotify } from '../lib/telegram'
@@ -16,6 +16,8 @@ export default function Profile() {
   const [user, setUser] = useState<User | null>(null)
   const [positions, setPositions] = useState<Position[]>([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
   const [depositOpen, setDepositOpen] = useState(false)
   const [depositAmount, setDepositAmount] = useState('1')
   const [depositSending, setDepositSending] = useState(false)
@@ -23,13 +25,22 @@ export default function Profile() {
   const [deposits, setDeposits] = useState<TonDeposit[]>([])
   const [paymentInfo, setPaymentInfo] = useState<PaymentInfo | null>(null)
 
+  const [withdrawOpen, setWithdrawOpen] = useState(false)
+  const [withdrawAmount, setWithdrawAmount] = useState('1')
+  const [withdrawSending, setWithdrawSending] = useState(false)
+  const [withdrawSent, setWithdrawSent] = useState(false)
+  const [withdrawError, setWithdrawError] = useState<string | null>(null)
+
   const [tonConnectUI] = useTonConnectUI()
   const wallet = useTonWallet()
   const navigate = useNavigate()
 
-  // Адрес кошелька: либо из активной сессии TonConnect, либо из бэкенда (если сессия устарела)
-  const walletAddress = wallet?.account.address ?? user?.ton_wallet_address ?? null
+  // activeWallet = live TonConnect session; walletAddress = fallback from backend
+  const activeWallet = wallet?.account.address ?? null
+  const walletAddress = activeWallet ?? user?.ton_wallet_address ?? null
   const isConnected = !!walletAddress
+  const canSend = !!activeWallet
+
   const tgUser = tg?.initDataUnsafe?.user
 
   const loadData = useCallback(async () => {
@@ -38,16 +49,20 @@ export default function Profile() {
     setPositions(p)
   }, [])
 
-  useEffect(() => {
+  const load = useCallback(() => {
+    setLoading(true)
+    setError(null)
     Promise.all([loadData(), fetchPaymentInfo().then(setPaymentInfo)])
-      .catch(console.error)
+      .catch((e) => setError(e?.message ?? 'Ошибка загрузки'))
       .finally(() => setLoading(false))
   }, [loadData])
 
+  useEffect(() => { load() }, [load])
+
   useEffect(() => {
-    if (!wallet?.account.address) return
-    saveWalletAddress(wallet.account.address).catch(console.error)
-  }, [wallet?.account.address])
+    if (!activeWallet) return
+    saveWalletAddress(activeWallet).catch(console.error)
+  }, [activeWallet])
 
   const handleOpenDeposit = () => {
     setDepositSent(false)
@@ -81,13 +96,58 @@ export default function Profile() {
     }
   }
 
+  const handleOpenWithdraw = () => {
+    setWithdrawSent(false)
+    setWithdrawError(null)
+    setWithdrawAmount('1')
+    setWithdrawOpen(true)
+  }
+
+  const handleWithdraw = async () => {
+    const amount = parseFloat(withdrawAmount)
+    if (!amount || amount < 0.5) return
+    if (!user?.ton_wallet_address) return
+
+    setWithdrawSending(true)
+    setWithdrawError(null)
+    try {
+      await requestWithdrawal(amount)
+      hapticNotify('success')
+      setWithdrawSent(true)
+      setTimeout(() => fetchMe().then(setUser).catch(console.error), 1000)
+    } catch (e: any) {
+      hapticNotify('error')
+      setWithdrawError(e?.response?.data?.detail ?? 'Ошибка при создании заявки')
+    } finally {
+      setWithdrawSending(false)
+    }
+  }
+
   if (loading) return <ProfileSkeleton />
+
+  if (error) return (
+    <div className="flex flex-col items-center justify-center h-full gap-4 px-6">
+      <div className="w-16 h-16 rounded-2xl bg-surface-2 border border-border flex items-center justify-center text-2xl">⚠️</div>
+      <div className="text-center">
+        <p className="text-ink-2 font-semibold mb-1">Не удалось загрузить профиль</p>
+        <p className="text-ink-3 text-sm">{error}</p>
+      </div>
+      <button
+        onClick={load}
+        className="px-6 py-2.5 bg-accent text-white text-sm font-semibold rounded-xl shadow-accent active:scale-95 transition-all"
+      >
+        Повторить
+      </button>
+    </div>
+  )
+
   if (!user) return null
 
   const totalValue = positions.reduce((s, p) => s + p.current_value, 0)
   const pnlPositive = user.total_pnl >= 0
   const displayName = user.first_name ?? tgUser?.first_name ?? user.username ?? 'Пользователь'
   const depositAmountNum = parseFloat(depositAmount) || 0
+  const withdrawAmountNum = parseFloat(withdrawAmount) || 0
   const minDep = paymentInfo?.min_deposit ?? 0.1
 
   return (
@@ -116,18 +176,27 @@ export default function Profile() {
           <StatCard label="Стоимость" value={formatTon(totalValue)} sub="TON" color="ink" />
         </motion.div>
 
-        <motion.button
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.08 }}
-          onClick={handleOpenDeposit}
-          className="w-full py-3.5 bg-accent text-white font-semibold rounded-2xl shadow-accent active:scale-95 transition-all flex items-center justify-center gap-2"
-        >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-            <path d="M12 5V19M5 12H19" stroke="white" strokeWidth="2.5" strokeLinecap="round" />
-          </svg>
-          Пополнить через TON
-        </motion.button>
+        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.08 }} className="grid grid-cols-2 gap-3">
+          <button
+            onClick={handleOpenDeposit}
+            className="py-3.5 bg-accent text-white font-semibold rounded-2xl shadow-accent active:scale-95 transition-all flex items-center justify-center gap-2"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+              <path d="M12 5V19M5 12H19" stroke="white" strokeWidth="2.5" strokeLinecap="round" />
+            </svg>
+            Пополнить
+          </button>
+          <button
+            onClick={handleOpenWithdraw}
+            disabled={!isConnected || user.balance < 0.5}
+            className="py-3.5 bg-surface-2 border border-border text-white font-semibold rounded-2xl active:scale-95 transition-all flex items-center justify-center gap-2 disabled:opacity-40"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+              <path d="M12 19V5M5 12L12 5L19 12" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+            Вывести
+          </button>
+        </motion.div>
 
         <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="bg-surface border border-border rounded-xl p-4">
           <div className="flex items-center gap-3 mb-2">
@@ -140,13 +209,19 @@ export default function Profile() {
                 {walletAddress ? walletAddress.slice(0, 8) + '...' + walletAddress.slice(-6) : 'Не подключён'}
               </p>
             </div>
-            <div className={`flex items-center gap-1.5 ${isConnected ? 'text-yes' : 'text-ink-4'}`}>
-              <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-yes' : 'bg-ink-4'}`} />
-              <span className="text-xs font-semibold">{isConnected ? 'Активен' : 'Откл.'}</span>
+            <div className={`flex items-center gap-1.5 ${canSend ? 'text-yes' : isConnected ? 'text-warn' : 'text-ink-4'}`}>
+              <div className={`w-2 h-2 rounded-full ${canSend ? 'bg-yes' : isConnected ? 'bg-warn' : 'bg-ink-4'}`} />
+              <span className="text-xs font-semibold">{canSend ? 'Активен' : isConnected ? 'Сохранён' : 'Откл.'}</span>
             </div>
           </div>
           {!isConnected && (
             <p className="text-xs text-ink-3 leading-relaxed">Подключи TON-кошелёк через кнопку «Пополнить» для внесения средств.</p>
+          )}
+          {isConnected && !canSend && (
+            <div className="flex items-center justify-between mt-1">
+              <p className="text-xs text-ink-3">Сессия истекла. Переподключи для пополнения.</p>
+              <button onClick={() => tonConnectUI.openModal()} className="text-xs font-semibold text-accent ml-2 flex-shrink-0">Войти →</button>
+            </div>
           )}
         </motion.div>
 
@@ -176,116 +251,244 @@ export default function Profile() {
         )}
 
         <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.16 }} className="bg-surface border border-border rounded-xl p-4 space-y-1">
-          <InfoRow label="Версия" value="0.2.0" />
+          <InfoRow label="Версия" value="0.3.0" />
           <InfoRow label="Механика" value="CPMM AMM" />
           <InfoRow label="Валюта" value="TON" />
           <InfoRow label="Комиссия" value="2%" />
         </motion.div>
       </div>
 
+      {/* Deposit modal */}
       {createPortal(
         <AnimatePresence>
           {depositOpen && (
-          <>
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-black/60 z-40" onClick={() => setDepositOpen(false)} />
-            <motion.div
-              initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
-              transition={{ type: 'spring', damping: 28, stiffness: 300 }}
-              className="fixed bottom-0 left-0 right-0 z-50 bg-surface border-t border-border rounded-t-3xl px-4 pt-4 max-h-[90vh] overflow-y-auto" style={{ paddingBottom: 'max(40px, env(safe-area-inset-bottom, 40px))' }}
-            >
-              <div className="w-10 h-1 bg-border rounded-full mx-auto mb-5" />
+            <>
+              <motion.div
+                initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                className="fixed inset-0 bg-black/60 z-40"
+                onClick={() => setDepositOpen(false)}
+              />
+              <motion.div
+                initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
+                transition={{ type: 'spring', damping: 28, stiffness: 300 }}
+                className="fixed bottom-0 left-0 right-0 z-50 glass-sheet rounded-t-3xl px-4 pt-4 max-h-[90vh] overflow-y-auto"
+                style={{ paddingBottom: 'max(40px, env(safe-area-inset-bottom, 40px))' }}
+              >
+                <div className="w-10 h-1 bg-border rounded-full mx-auto mb-5" />
 
-              {depositSent ? (
-                <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="text-center py-4">
-                  <div className="text-4xl mb-3">✅</div>
-                  <h2 className="text-lg font-bold text-white mb-1">Транзакция отправлена!</h2>
-                  <p className="text-sm text-ink-3 mb-5">Средства появятся на балансе в течение ~30 секунд</p>
-                  <button onClick={() => setDepositOpen(false)} className="w-full py-3 bg-accent text-white font-semibold rounded-2xl shadow-accent active:scale-95 transition-all">Закрыть</button>
-                </motion.div>
-              ) : (
-                <>
-                  <h2 className="text-lg font-bold text-white mb-1">Пополнить через TON</h2>
-                  <p className="text-sm text-ink-3 mb-4">Отправь TON — баланс зачислится автоматически за ~30 сек</p>
+                {depositSent ? (
+                  <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="text-center py-4">
+                    <div className="text-4xl mb-3">✅</div>
+                    <h2 className="text-lg font-bold text-white mb-1">Транзакция отправлена!</h2>
+                    <p className="text-sm text-ink-3 mb-5">Средства появятся на балансе в течение ~30 секунд</p>
+                    <button onClick={() => setDepositOpen(false)} className="w-full py-3 bg-accent text-white font-semibold rounded-2xl shadow-accent active:scale-95 transition-all">Закрыть</button>
+                  </motion.div>
+                ) : (
+                  <>
+                    <h2 className="text-lg font-bold text-white mb-1">Пополнить через TON</h2>
+                    <p className="text-sm text-ink-3 mb-4">Отправь TON — баланс зачислится автоматически за ~30 сек</p>
 
-                  {!isConnected ? (
-                    <div className="mb-4">
-                      <p className="text-xs text-ink-3 mb-2">Подключи кошелёк чтобы продолжить:</p>
-                      <button
-                        onClick={() => tonConnectUI.openModal()}
-                        className="w-full py-3 bg-surface-2 border border-border text-white font-semibold rounded-xl active:scale-95 transition-all flex items-center justify-center gap-2"
-                      >
-                        <TonIcon />
-                        Подключить TON кошелёк
-                      </button>
-                    </div>
-                  ) : (
-                    <>
-                      <div className="bg-surface-2 border border-border rounded-xl p-3 mb-4 flex items-center gap-2">
-                        <TonIcon />
-                        <div className="flex-1 min-w-0">
-                          <p className="text-xs text-ink-3">Кошелёк подключён</p>
-                          <p className="text-sm font-mono text-white truncate">{walletAddress!.slice(0, 10)}...{walletAddress!.slice(-8)}</p>
-                        </div>
-                        <div className="w-2 h-2 rounded-full bg-yes flex-shrink-0" />
-                      </div>
-
+                    {!isConnected ? (
                       <div className="mb-4">
-                        <label className="text-xs text-ink-3 mb-1.5 block">Сумма (мин. {minDep} TON)</label>
-                        <div className="relative">
-                          <input
-                            type="number" value={depositAmount}
-                            onChange={(e) => setDepositAmount(e.target.value)}
-                            min={minDep} step="0.1"
-                            className="w-full bg-surface-2 border border-border rounded-xl px-4 py-3 text-white text-lg font-bold focus:outline-none focus:border-accent transition-colors pr-16"
-                          />
-                          <span className="absolute right-4 top-1/2 -translate-y-1/2 text-sm text-ink-3 font-semibold">TON</span>
+                        <p className="text-xs text-ink-3 mb-2">Подключи кошелёк чтобы продолжить:</p>
+                        <button
+                          onClick={() => tonConnectUI.openModal()}
+                          className="w-full py-3 bg-surface-2 border border-border text-white font-semibold rounded-xl active:scale-95 transition-all flex items-center justify-center gap-2"
+                        >
+                          <TonIcon />
+                          Подключить TON кошелёк
+                        </button>
+                      </div>
+                    ) : !canSend ? (
+                      <div className="mb-4">
+                        <div className="bg-surface-2 border border-border rounded-xl p-3 mb-3 flex items-center gap-2">
+                          <TonIcon />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-xs text-ink-3">Адрес сохранён, сессия истекла</p>
+                            <p className="text-sm font-mono text-white truncate">{walletAddress!.slice(0, 10)}...{walletAddress!.slice(-8)}</p>
+                          </div>
+                          <div className="w-2 h-2 rounded-full bg-warn flex-shrink-0" />
                         </div>
-                        <div className="flex gap-2 mt-2">
-                          {[0.5, 1, 5, 10].map((v) => (
-                            <button
-                              key={v}
-                              onClick={() => setDepositAmount(String(v))}
-                              className={`flex-1 py-1.5 text-xs font-semibold rounded-lg border transition-all active:scale-95 ${depositAmountNum === v ? 'bg-accent/15 border-accent/40 text-accent' : 'bg-surface-2 border-border text-ink-3'}`}
-                            >{v}</button>
+                        <button
+                          onClick={() => tonConnectUI.openModal()}
+                          className="w-full py-3 bg-surface-2 border border-border text-white font-semibold rounded-xl active:scale-95 transition-all flex items-center justify-center gap-2"
+                        >
+                          <TonIcon />
+                          Переподключить кошелёк
+                        </button>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="bg-surface-2 border border-border rounded-xl p-3 mb-4 flex items-center gap-2">
+                          <TonIcon />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-xs text-ink-3">Кошелёк подключён</p>
+                            <p className="text-sm font-mono text-white truncate">{walletAddress!.slice(0, 10)}...{walletAddress!.slice(-8)}</p>
+                          </div>
+                          <div className="w-2 h-2 rounded-full bg-yes flex-shrink-0" />
+                        </div>
+
+                        <div className="mb-4">
+                          <label className="text-xs text-ink-3 mb-1.5 block">Сумма (мин. {minDep} TON)</label>
+                          <div className="relative">
+                            <input
+                              type="number" value={depositAmount}
+                              onChange={(e) => setDepositAmount(e.target.value)}
+                              min={minDep} step="0.1"
+                              className="w-full bg-surface-2 border border-border rounded-xl px-4 py-3 text-white text-lg font-bold focus:outline-none focus:border-accent transition-colors pr-16"
+                            />
+                            <span className="absolute right-4 top-1/2 -translate-y-1/2 text-sm text-ink-3 font-semibold">TON</span>
+                          </div>
+                          <div className="flex gap-2 mt-2">
+                            {[0.5, 1, 5, 10].map((v) => (
+                              <button
+                                key={v}
+                                onClick={() => setDepositAmount(String(v))}
+                                className={`flex-1 py-1.5 text-xs font-semibold rounded-lg border transition-all active:scale-95 ${depositAmountNum === v ? 'bg-accent/15 border-accent/40 text-accent' : 'bg-surface-2 border-border text-ink-3'}`}
+                              >{v}</button>
+                            ))}
+                          </div>
+                        </div>
+
+                        <button
+                          onClick={handleDeposit}
+                          disabled={depositSending || depositAmountNum < minDep || !paymentInfo?.app_wallet}
+                          className="w-full py-3.5 bg-accent text-white font-semibold rounded-2xl shadow-accent disabled:opacity-50 active:scale-95 transition-all flex items-center justify-center gap-2"
+                        >
+                          {depositSending ? (
+                            <><div className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />Подтверди в кошельке...</>
+                          ) : (
+                            `Отправить ${depositAmountNum > 0 ? depositAmountNum : ''} TON`
+                          )}
+                        </button>
+
+                        {!paymentInfo?.app_wallet && (
+                          <p className="text-xs text-no text-center mt-2">Кошелёк приложения не настроен. Свяжитесь с поддержкой.</p>
+                        )}
+                      </>
+                    )}
+
+                    {deposits.length > 0 && (
+                      <div className="mt-5">
+                        <p className="text-xs text-ink-3 font-medium mb-2">Последние пополнения</p>
+                        <div className="space-y-1">
+                          {deposits.slice(0, 3).map((d) => (
+                            <div key={d.tx_hash} className="flex items-center justify-between py-1.5 border-b border-border/40">
+                              <span className="text-xs text-ink-3">{new Date(d.created_at).toLocaleDateString('ru', { day: 'numeric', month: 'short' })}</span>
+                              <span className="text-sm font-semibold text-yes">+{d.amount_ton.toFixed(2)} TON</span>
+                            </div>
                           ))}
                         </div>
                       </div>
+                    )}
+                  </>
+                )}
+              </motion.div>
+            </>
+          )}
+        </AnimatePresence>,
+        document.body
+      )}
 
-                      <button
-                        onClick={handleDeposit}
-                        disabled={depositSending || depositAmountNum < minDep || !paymentInfo?.app_wallet}
-                        className="w-full py-3.5 bg-accent text-white font-semibold rounded-2xl shadow-accent disabled:opacity-50 active:scale-95 transition-all flex items-center justify-center gap-2"
-                      >
-                        {depositSending ? (
-                          <><div className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />Подтверди в кошельке...</>
-                        ) : (
-                          `Отправить ${depositAmountNum > 0 ? depositAmountNum : ''} TON`
-                        )}
-                      </button>
+      {/* Withdrawal modal */}
+      {createPortal(
+        <AnimatePresence>
+          {withdrawOpen && (
+            <>
+              <motion.div
+                initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                className="fixed inset-0 bg-black/60 z-40"
+                onClick={() => setWithdrawOpen(false)}
+              />
+              <motion.div
+                initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
+                transition={{ type: 'spring', damping: 28, stiffness: 300 }}
+                className="fixed bottom-0 left-0 right-0 z-50 glass-sheet rounded-t-3xl px-4 pt-4 max-h-[90vh] overflow-y-auto"
+                style={{ paddingBottom: 'max(40px, env(safe-area-inset-bottom, 40px))' }}
+              >
+                <div className="w-10 h-1 bg-border rounded-full mx-auto mb-5" />
 
-                      {!paymentInfo?.app_wallet && (
-                        <p className="text-xs text-no text-center mt-2">Кошелёк приложения не настроен. Свяжитесь с поддержкой.</p>
-                      )}
-                    </>
-                  )}
+                {withdrawSent ? (
+                  <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="text-center py-4">
+                    <div className="text-4xl mb-3">✅</div>
+                    <h2 className="text-lg font-bold text-white mb-1">Заявка принята!</h2>
+                    <p className="text-sm text-ink-3 mb-5">Вывод обрабатывается. Средства поступят в течение 24 часов.</p>
+                    <button onClick={() => setWithdrawOpen(false)} className="w-full py-3 bg-accent text-white font-semibold rounded-2xl shadow-accent active:scale-95 transition-all">Закрыть</button>
+                  </motion.div>
+                ) : (
+                  <>
+                    <h2 className="text-lg font-bold text-white mb-1">Вывод TON</h2>
+                    <p className="text-sm text-ink-3 mb-4">Заявка обрабатывается вручную в течение 24 часов</p>
 
-                  {deposits.length > 0 && (
-                    <div className="mt-5">
-                      <p className="text-xs text-ink-3 font-medium mb-2">Последние пополнения</p>
-                      <div className="space-y-1">
-                        {deposits.slice(0, 3).map((d) => (
-                          <div key={d.tx_hash} className="flex items-center justify-between py-1.5 border-b border-border/40">
-                            <span className="text-xs text-ink-3">{new Date(d.created_at).toLocaleDateString('ru', { day: 'numeric', month: 'short' })}</span>
-                            <span className="text-sm font-semibold text-yes">+{d.amount_ton.toFixed(2)} TON</span>
-                          </div>
-                        ))}
+                    {!user.ton_wallet_address ? (
+                      <div className="bg-no/10 border border-no/20 rounded-xl p-4 text-center">
+                        <p className="text-sm text-no font-semibold mb-1">Кошелёк не привязан</p>
+                        <p className="text-xs text-ink-3">Подключи TON-кошелёк через «Пополнить» для вывода средств</p>
                       </div>
-                    </div>
-                  )}
-                </>
-              )}
-            </motion.div>
-          </>
+                    ) : (
+                      <>
+                        <div className="bg-surface-2 border border-border rounded-xl p-3 mb-3 flex items-center gap-2">
+                          <TonIcon />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-xs text-ink-3">Вывод на кошелёк</p>
+                            <p className="text-sm font-mono text-white truncate">{user.ton_wallet_address.slice(0, 10)}...{user.ton_wallet_address.slice(-8)}</p>
+                          </div>
+                        </div>
+
+                        <div className="bg-surface-2 border border-border rounded-xl p-3 mb-4 flex justify-between items-center">
+                          <span className="text-xs text-ink-3">Доступно</span>
+                          <span className="text-sm font-bold text-white tabular">{formatTon(user.balance)} TON</span>
+                        </div>
+
+                        <div className="mb-4">
+                          <label className="text-xs text-ink-3 mb-1.5 block">Сумма вывода (мин. 0.5 TON)</label>
+                          <div className="relative">
+                            <input
+                              type="number" value={withdrawAmount}
+                              onChange={(e) => setWithdrawAmount(e.target.value)}
+                              min="0.5" step="0.1"
+                              className="w-full bg-surface-2 border border-border rounded-xl px-4 py-3 text-white text-lg font-bold focus:outline-none focus:border-accent transition-colors pr-16"
+                            />
+                            <span className="absolute right-4 top-1/2 -translate-y-1/2 text-sm text-ink-3 font-semibold">TON</span>
+                          </div>
+                          <div className="flex gap-2 mt-2">
+                            {[0.5, 1, 5].map((v) => (
+                              <button
+                                key={v}
+                                onClick={() => setWithdrawAmount(String(Math.min(v, user.balance)))}
+                                className={`flex-1 py-1.5 text-xs font-semibold rounded-lg border transition-all active:scale-95 ${withdrawAmountNum === v ? 'bg-accent/15 border-accent/40 text-accent' : 'bg-surface-2 border-border text-ink-3'}`}
+                              >{v}</button>
+                            ))}
+                            <button
+                              onClick={() => setWithdrawAmount(String(Math.max(0.5, user.balance - 0.05).toFixed(2)))}
+                              className="flex-1 py-1.5 text-xs font-semibold rounded-lg border bg-surface-2 border-border text-ink-3 active:scale-95 transition-all"
+                            >Макс.</button>
+                          </div>
+                        </div>
+
+                        {withdrawError && (
+                          <div className="bg-no/10 border border-no/20 rounded-xl p-3 mb-4 text-center">
+                            <p className="text-sm text-no">{withdrawError}</p>
+                          </div>
+                        )}
+
+                        <button
+                          onClick={handleWithdraw}
+                          disabled={withdrawSending || withdrawAmountNum < 0.5 || withdrawAmountNum > user.balance}
+                          className="w-full py-3.5 bg-accent text-white font-semibold rounded-2xl shadow-accent disabled:opacity-50 active:scale-95 transition-all flex items-center justify-center gap-2"
+                        >
+                          {withdrawSending ? (
+                            <><div className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />Отправка заявки...</>
+                          ) : (
+                            `Вывести ${withdrawAmountNum > 0 ? withdrawAmountNum : ''} TON`
+                          )}
+                        </button>
+                      </>
+                    )}
+                  </>
+                )}
+              </motion.div>
+            </>
           )}
         </AnimatePresence>,
         document.body
@@ -355,7 +558,10 @@ function ProfileSkeleton() {
       <div className="grid grid-cols-2 gap-3">
         {[1,2,3,4].map(i => <div key={i} className="h-20 bg-surface border border-border rounded-xl" />)}
       </div>
-      <div className="h-12 bg-surface-2 rounded-2xl" />
+      <div className="grid grid-cols-2 gap-3">
+        <div className="h-12 bg-surface-2 rounded-2xl" />
+        <div className="h-12 bg-surface-2 rounded-2xl" />
+      </div>
     </div>
   )
 }

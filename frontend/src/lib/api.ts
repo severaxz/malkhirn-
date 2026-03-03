@@ -110,6 +110,15 @@ export interface TonDeposit {
   created_at: string
 }
 
+export interface WithdrawalRequest {
+  id: number
+  amount_ton: number
+  to_address: string
+  status: string
+  created_at: string
+  note: string | null
+}
+
 // ─── API calls ────────────────────────────────────────────────────────────────
 
 export const fetchMarkets = (status = 'active', category?: string) =>
@@ -172,3 +181,9 @@ export const saveWalletAddress = (address: string) =>
 
 export const fetchDeposits = () =>
   api.get<TonDeposit[]>('/payments/deposits').then((r) => r.data)
+
+export const requestWithdrawal = (amount: number) =>
+  api.post<WithdrawalRequest>('/payments/withdraw', { amount }).then((r) => r.data)
+
+export const fetchWithdrawals = () =>
+  api.get<WithdrawalRequest[]>('/payments/withdrawals').then((r) => r.data)

@@ -14,7 +14,7 @@
   }
 
   body {
-    background: #09090E;
+    background: #09090A;
     color: #FFFFFF;
     font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'SF Pro Text', system-ui, sans-serif;
     -webkit-font-smoothing: antialiased;
@@ -29,7 +29,9 @@
 
 @layer components {
   .card {
-    @apply bg-surface rounded-xl border border-border shadow-card;
+    @apply rounded-xl shadow-card;
+    background: rgba(17,17,19,0.9);
+    border: 1px solid rgba(255,255,255,0.05);
   }
   .skeleton {
     @apply bg-surface-2 rounded animate-shimmer;
@@ -44,10 +46,33 @@
   .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
   .tabular { font-variant-numeric: tabular-nums; }
 
-  /* frosted glass — для хедера/навбара */
+  /* Frosted glass — header/nav */
   .glass {
-    background: rgba(9,9,14,0.85);
-    backdrop-filter: saturate(180%) blur(16px);
-    -webkit-backdrop-filter: saturate(180%) blur(16px);
+    background: rgba(9,9,10,0.82);
+    backdrop-filter: saturate(180%) blur(20px);
+    -webkit-backdrop-filter: saturate(180%) blur(20px);
+    box-shadow: 0 1px 0 rgba(255,255,255,0.05);
+  }
+
+  /* Liquid glass — bottom sheets, modals */
+  .glass-sheet {
+    background: rgba(17,17,19,0.88);
+    backdrop-filter: blur(24px) saturate(160%);
+    -webkit-backdrop-filter: blur(24px) saturate(160%);
+    border-top: 1px solid rgba(255,255,255,0.07);
+    box-shadow:
+      0 -8px 40px rgba(0,0,0,0.6),
+      inset 0 1px 0 rgba(255,255,255,0.06);
+  }
+
+  /* Liquid glass — cards */
+  .glass-card {
+    background: rgba(17,17,19,0.75);
+    backdrop-filter: blur(12px) saturate(140%);
+    -webkit-backdrop-filter: blur(12px) saturate(140%);
+    border: 1px solid rgba(255,255,255,0.06);
+    box-shadow:
+      0 2px 12px rgba(0,0,0,0.5),
+      inset 0 1px 0 rgba(255,255,255,0.05);
   }
 }

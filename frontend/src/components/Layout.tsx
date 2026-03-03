@@ -60,13 +60,13 @@ export default function Layout() {
 
       {/* Main */}
       <main className="flex-1 overflow-y-auto overscroll-none relative z-10">
-        <AnimatePresence mode="wait" initial={false}>
+        <AnimatePresence mode="sync" initial={false}>
           <motion.div
             key={location.pathname}
-            initial={{ opacity: 0, y: 6 }}
-            animate={{ opacity: 1, y: 0 }}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
+            transition={{ duration: 0.12 }}
             className="h-full"
           >
             <Outlet />
@@ -134,8 +134,8 @@ const NAV_ITEMS = [
   { to: '/profile',     label: 'Profile',   Icon: IconProfile },
 ]
 
-const A = '#7C5CF6'
-const I = '#555570'
+const A = '#C41E1E'
+const I = '#606070'
 
 function IconMarkets({ active }: { active: boolean }) {
   const c = active ? A : I

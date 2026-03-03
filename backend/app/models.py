@@ -20,6 +20,7 @@ class User(Base):
     positions = relationship("Position", back_populates="user")
     trades = relationship("Trade", back_populates="user")
     ton_deposits = relationship("TonDeposit", back_populates="user")
+    withdrawal_requests = relationship("WithdrawalRequest", back_populates="user")
 
 
 class Market(Base):
@@ -104,3 +105,18 @@ class TonDeposit(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     user = relationship("User", back_populates="ton_deposits")
+
+
+class WithdrawalRequest(Base):
+    """Заявки на вывод TON (обрабатываются администратором)."""
+    __tablename__ = "withdrawal_requests"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    amount_ton = Column(Float, nullable=False)
+    to_address = Column(String(128), nullable=False)
+    status = Column(String(16), default="pending")  # pending | processing | done | cancelled
+    note = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    user = relationship("User", back_populates="withdrawal_requests")

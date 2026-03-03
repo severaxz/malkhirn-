@@ -4,14 +4,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.database import get_db
 from app.auth import get_current_user
-from app.models import User, TonDeposit
+from app.models import User, TonDeposit, WithdrawalRequest
 from app.config import TON_WALLET_ADDRESS, MIN_DEPOSIT_TON
 
 router = APIRouter(prefix="/payments", tags=["payments"])
 
+MIN_WITHDRAW_TON = 0.5
+
 
 class WalletRequest(BaseModel):
-    address: str  # TON wallet address пользователя
+    address: str
 
 
 class WalletResponse(BaseModel):
@@ -20,9 +22,12 @@ class WalletResponse(BaseModel):
     min_deposit: float
 
 
+class WithdrawRequest(BaseModel):
+    amount: float
+
+
 @router.get("/info", response_model=WalletResponse)
 async def payment_info(current_user: User = Depends(get_current_user)):
-    """Возвращает адрес кошелька приложения и минимальный депозит."""
     return WalletResponse(
         ton_wallet_address=current_user.ton_wallet_address,
         app_wallet=TON_WALLET_ADDRESS,
@@ -36,12 +41,10 @@ async def save_wallet(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Сохраняет TON-адрес пользователя для отслеживания депозитов."""
     address = req.address.strip()
     if not address:
         raise HTTPException(400, "Некорректный адрес")
 
-    # Проверяем, не занят ли адрес другим пользователем
     existing = await db.execute(
         select(User).where(
             User.ton_wallet_address == address,
@@ -61,7 +64,6 @@ async def get_deposits(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """История TON-депозитов пользователя."""
     result = await db.execute(
         select(TonDeposit)
         .where(TonDeposit.user_id == current_user.id)
@@ -76,4 +78,63 @@ async def get_deposits(
             "created_at": d.created_at.isoformat(),
         }
         for d in deposits
+    ]
+
+
+@router.post("/withdraw")
+async def request_withdrawal(
+    data: WithdrawRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Создаёт заявку на вывод TON. Баланс резервируется немедленно."""
+    if not current_user.ton_wallet_address:
+        raise HTTPException(400, "Сначала подключи TON-кошелёк")
+    if data.amount < MIN_WITHDRAW_TON:
+        raise HTTPException(400, f"Минимальная сумма вывода: {MIN_WITHDRAW_TON} TON")
+    if data.amount > current_user.balance:
+        raise HTTPException(400, "Недостаточно средств на балансе")
+
+    current_user.balance -= data.amount
+    wr = WithdrawalRequest(
+        user_id=current_user.id,
+        amount_ton=data.amount,
+        to_address=current_user.ton_wallet_address,
+        status="pending",
+    )
+    db.add(wr)
+    await db.commit()
+    await db.refresh(wr)
+    return {
+        "id": wr.id,
+        "amount_ton": wr.amount_ton,
+        "to_address": wr.to_address,
+        "status": wr.status,
+        "created_at": wr.created_at.isoformat(),
+        "note": wr.note,
+    }
+
+
+@router.get("/withdrawals")
+async def get_withdrawals(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    result = await db.execute(
+        select(WithdrawalRequest)
+        .where(WithdrawalRequest.user_id == current_user.id)
+        .order_by(WithdrawalRequest.created_at.desc())
+        .limit(20)
+    )
+    items = result.scalars().all()
+    return [
+        {
+            "id": w.id,
+            "amount_ton": w.amount_ton,
+            "to_address": w.to_address,
+            "status": w.status,
+            "created_at": w.created_at.isoformat(),
+            "note": w.note,
+        }
+        for w in items
     ]
