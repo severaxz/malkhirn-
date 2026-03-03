@@ -6,6 +6,7 @@ from app.database import get_db
 from app.auth import get_current_user
 from app.models import User, TonDeposit, WithdrawalRequest
 from app.config import TON_WALLET_ADDRESS, MIN_DEPOSIT_TON
+from app.ton_utils import normalize_address
 
 router = APIRouter(prefix="/payments", tags=["payments"])
 
@@ -44,6 +45,9 @@ async def save_wallet(
     address = req.address.strip()
     if not address:
         raise HTTPException(400, "Некорректный адрес")
+
+    # Нормализуем к raw формату для единообразного хранения
+    address = normalize_address(address)
 
     existing = await db.execute(
         select(User).where(

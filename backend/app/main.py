@@ -15,6 +15,7 @@ async def poll_ton_deposits():
     import httpx
     from sqlalchemy import select
     from app.models import User, TonDeposit
+    from app.ton_utils import normalize_address
 
     if not TON_WALLET_ADDRESS:
         logger.info("TON_WALLET_ADDRESS не задан — мониторинг депозитов отключён")
@@ -36,6 +37,15 @@ async def poll_ton_deposits():
                 txs = resp.json().get("result", [])
 
                 async with SessionLocal() as db:
+                    # Загружаем всех пользователей с кошельками и нормализуем адреса
+                    wallet_users = (await db.execute(
+                        select(User).where(User.ton_wallet_address.isnot(None))
+                    )).scalars().all()
+                    addr_to_user = {
+                        normalize_address(u.ton_wallet_address): u
+                        for u in wallet_users if u.ton_wallet_address
+                    }
+
                     for tx in txs:
                         tx_hash = tx.get("transaction_id", {}).get("hash", "")
                         in_msg = tx.get("in_msg", {})
@@ -52,11 +62,9 @@ async def poll_ton_deposits():
                         if existing.scalar_one_or_none():
                             continue
 
-                        # Найти пользователя по адресу кошелька
-                        user_result = await db.execute(
-                            select(User).where(User.ton_wallet_address == from_addr)
-                        )
-                        user = user_result.scalar_one_or_none()
+                        # Найти пользователя по нормализованному адресу
+                        from_raw = normalize_address(from_addr)
+                        user = addr_to_user.get(from_raw)
                         if not user:
                             continue
 
