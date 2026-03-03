@@ -8,11 +8,7 @@ import Leaderboard from './pages/Leaderboard'
 import Profile from './pages/Profile'
 import Admin from './pages/Admin'
 
-const MANIFEST_URL = `data:application/json,${encodeURIComponent(JSON.stringify({
-  url: window.location.origin,
-  name: 'Malkhirn',
-  iconUrl: `${window.location.origin}/icon.png`,
-}))}`
+const MANIFEST_URL = `${window.location.origin}/tonconnect-manifest.json`
 
 export default function App() {
   return (
